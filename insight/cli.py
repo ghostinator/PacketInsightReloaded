@@ -17,6 +17,7 @@ from .utils import get_active_interfaces, extract_device_name, detect_primary_in
 from .telemetry import TelemetryManager
 from .report import ReportGenerator
 from .live_capture import LiveCaptureManager
+from .version import __version__
 
 import logging
 
@@ -433,7 +434,8 @@ Examples:
     parser.add_argument('--list-interfaces', action='store_true',
                        help='List available network interfaces')
     parser.add_argument('--version', action='version', 
-                       version=f'Packet Insight {from .version import __version__; print(__version__)}')
+                    version=f'Packet Insight {__version__}')
+
 
     args = parser.parse_args()
 

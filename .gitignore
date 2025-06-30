@@ -1,2 +1,4 @@
 /.DS_Store
 /.venv
+insight/__pycache__/cli.cpython-312.pyc
+/insight/__pycache__/*
