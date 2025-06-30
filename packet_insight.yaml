@@ -1,0 +1,37 @@
+# Packet Insight Configuration
+# This file demonstrates available configuration options
+
+# Analysis thresholds
+retransmission_threshold: 0.05  # 5% retransmission rate threshold
+high_jitter_threshold: 0.1      # 100ms jitter threshold
+syn_delay_threshold: 0.5        # 500ms SYN delay threshold
+dns_timeout_threshold: 1.0      # 1s DNS response time threshold
+
+# Live capture settings
+rolling_capture_size_mb: 100    # Start new capture file after 100MB
+rolling_capture_interval_min: 15 # Start new capture file every 15 minutes
+enable_realtime_alerts: true    # Show alerts in real-time during live capture
+default_capture_duration: 60    # Default capture duration in seconds
+
+# Output settings
+default_output_format: "text"   # Default output format (text, json, csv, html)
+default_output_dir: "reports"   # Default directory for saving reports
+
+# Advanced settings
+packet_sample_rate: 1           # Process every Nth packet (1 = all packets)
+max_packets_in_memory: 10000    # Maximum packets to keep in memory
+enable_experimental_features: false # Enable experimental features
+
+# Telemetry settings (anonymous usage analytics)
+telemetry_enabled: false        # Enable anonymous telemetry
+telemetry_interval_hours: 24    # How often to send telemetry data
+
+# Logging settings
+log_level: "INFO"               # Logging level (DEBUG, INFO, WARNING, ERROR)
+log_file: null                  # Log file path (null for console only)
+enable_debug_mode: false        # Enable debug mode
+
+# Performance settings
+worker_threads: 4               # Number of worker threads for analysis
+chunk_size: 1000                # Packet processing chunk size
+memory_limit_mb: 512            # Memory limit for analysis operations

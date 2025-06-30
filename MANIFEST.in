@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include requirements.txt
+include requirements-dev.txt
+recursive-include insight *.py
+recursive-include insight *.yaml
+recursive-include insight *.json
+recursive-exclude tests *
+recursive-exclude .github *
+global-exclude *.pyc
+global-exclude __pycache__

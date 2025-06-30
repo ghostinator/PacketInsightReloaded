@@ -1,0 +1,3 @@
+[console_scripts]
+packet-insight = insight.cli:main
+pi-analyze = insight.cli:main

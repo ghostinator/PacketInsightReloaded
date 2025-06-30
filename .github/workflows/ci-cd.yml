@@ -1,0 +1,400 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+env:
+  PYTHON_DEFAULT_VERSION: "3.10"
+
+jobs:
+  # Code Quality and Security Analysis
+  quality:
+    runs-on: ubuntu-latest
+    name: Code Quality & Security
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_DEFAULT_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+
+    - name: Code formatting check (Black)
+      run: |
+        black --check --diff .
+
+    - name: Import sorting check (isort)
+      run: |
+        isort --check-only --diff .
+
+    - name: Linting (flake8)
+      run: |
+        flake8 insight/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 insight/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=88 --statistics
+
+    - name: Advanced linting (pylint)
+      run: |
+        pylint insight/ --fail-under=8.0
+
+    - name: Type checking (mypy)
+      run: |
+        mypy insight/ --ignore-missing-imports
+
+    - name: Security analysis (bandit)
+      run: |
+        bandit -r insight/ -f json -o bandit-report.json
+        bandit -r insight/ --severity-level medium
+
+    - name: Dependency security check (safety)
+      run: |
+        safety check --json --output safety-report.json
+        safety check
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+  # Multi-platform testing
+  test:
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+
+    runs-on: ${{ matrix.os }}
+    name: Test (Python ${{ matrix.python-version }} on ${{ matrix.os }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    # Platform-specific dependencies
+    - name: Install system dependencies (Ubuntu)
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tshark
+        # Allow non-root packet capture
+        sudo setcap cap_net_raw,cap_net_admin=eip /usr/bin/dumpcap
+
+    - name: Install system dependencies (macOS)
+      if: matrix.os == 'macos-latest'
+      run: |
+        brew install wireshark
+
+    - name: Install system dependencies (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        # Download and install Wireshark (headless)
+        Invoke-WebRequest -Uri "https://1.eu.dl.wireshark.org/win64/Wireshark-win64-4.0.0.exe" -OutFile "wireshark-installer.exe"
+        Start-Process -FilePath "wireshark-installer.exe" -ArgumentList "/S" -Wait
+        # Add to PATH
+        echo "C:\Program Files\Wireshark" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v --cov=insight --cov-report=xml --cov-report=html --junitxml=test-results.xml
+
+    - name: Upload test results
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results-${{ matrix.os }}-py${{ matrix.python-version }}
+        path: |
+          test-results.xml
+          htmlcov/
+          .coverage
+
+    - name: Upload coverage to Codecov
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == env.PYTHON_DEFAULT_VERSION
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  # Integration tests
+  integration:
+    needs: test
+    runs-on: ubuntu-latest
+    name: Integration Tests
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_DEFAULT_VERSION }}
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y tshark tcpdump
+        sudo setcap cap_net_raw,cap_net_admin=eip /usr/bin/dumpcap
+
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+
+    - name: Run integration tests
+      run: |
+        pytest tests/integration/ -v --timeout=300
+
+    - name: Test CLI functionality
+      run: |
+        # Test help
+        packet-insight --help
+
+        # Test configuration export
+        packet-insight --export-config test-config.yaml
+
+        # Test interface listing
+        packet-insight --list-interfaces
+
+  # Build distributions
+  build:
+    needs: [quality, test]
+    runs-on: ubuntu-latest
+    name: Build Distributions
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_DEFAULT_VERSION }}
+
+    - name: Install build dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build wheel twine
+
+    - name: Build source distribution
+      run: |
+        python -m build --sdist
+
+    - name: Build wheel distribution
+      run: |
+        python -m build --wheel
+
+    - name: Check distributions
+      run: |
+        twine check dist/*
+
+    - name: Upload distributions
+      uses: actions/upload-artifact@v3
+      with:
+        name: python-distributions
+        path: dist/
+
+  # Build executables
+  build-executables:
+    needs: [quality, test]
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    runs-on: ${{ matrix.os }}
+    name: Build Executable (${{ matrix.os }})
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_DEFAULT_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+
+    - name: Build executable
+      run: |
+        pyinstaller --onefile --name packet-insight-${{ matrix.os }} insight/cli.py
+
+    - name: Test executable (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        ./dist/packet-insight-${{ matrix.os }} --help
+
+    - name: Test executable (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        .\dist\packet-insight-${{ matrix.os }}.exe --help
+
+    - name: Upload executable
+      uses: actions/upload-artifact@v3
+      with:
+        name: executable-${{ matrix.os }}
+        path: dist/
+
+  # Documentation
+  docs:
+    runs-on: ubuntu-latest
+    name: Build Documentation
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_DEFAULT_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements-dev.txt
+        pip install -e .
+
+    - name: Build documentation
+      run: |
+        cd docs/
+        make html
+
+    - name: Upload documentation
+      uses: actions/upload-artifact@v3
+      with:
+        name: documentation
+        path: docs/_build/html/
+
+    - name: Deploy to GitHub Pages
+      if: github.ref == 'refs/heads/main'
+      uses: peaceiris/actions-gh-pages@v3
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: docs/_build/html/
+
+  # PyPI Publishing
+  publish-pypi:
+    if: github.event_name == 'release'
+    needs: [quality, test, integration, build]
+    runs-on: ubuntu-latest
+    name: Publish to PyPI
+    environment: pypi
+
+    steps:
+    - name: Download distributions
+      uses: actions/download-artifact@v3
+      with:
+        name: python-distributions
+        path: dist/
+
+    - name: Publish to Test PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+        repository_url: https://test.pypi.org/legacy/
+        skip_existing: true
+
+    - name: Publish to PyPI
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}
+
+  # GitHub Release
+  github-release:
+    if: github.event_name == 'release'
+    needs: [quality, test, integration, build, build-executables]
+    runs-on: ubuntu-latest
+    name: Attach Assets to GitHub Release
+
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v3
+
+    - name: Prepare release assets
+      run: |
+        mkdir -p release-assets
+
+        # Copy executables
+        cp executable-ubuntu-latest/* release-assets/
+        cp executable-windows-latest/* release-assets/
+        cp executable-macos-latest/* release-assets/
+
+        # Copy distributions
+        cp python-distributions/* release-assets/
+
+        # Create checksums
+        cd release-assets
+        sha256sum * > checksums.txt
+
+    - name: Upload release assets
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release-assets/*
+        body: |
+          ## Downloads
+
+          ### Standalone Executables
+          - **Linux**: `packet-insight-ubuntu-latest`
+          - **Windows**: `packet-insight-windows-latest.exe`
+          - **macOS**: `packet-insight-macos-latest`
+
+          ### Python Packages
+          - **Source**: `packet-insight-*.tar.gz`
+          - **Wheel**: `packet_insight-*-py3-none-any.whl`
+
+          ### Installation
+          ```bash
+          # From PyPI
+          pip install packet-insight
+
+          # From wheel
+          pip install packet_insight-*-py3-none-any.whl
+          ```
+
+          ### Verification
+          SHA256 checksums are available in `checksums.txt`.
+
+  # Cleanup
+  cleanup:
+    if: always()
+    needs: [quality, test, integration, build, build-executables, docs]
+    runs-on: ubuntu-latest
+    name: Cleanup
+
+    steps:
+    - name: Delete old artifacts
+      uses: geekyeggo/delete-artifact@v2
+      with:
+        name: |
+          test-results-*
+          security-reports
+        failOnError: false
