@@ -82,9 +82,9 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
 
-  security-analysis:
+    security-analysis:
     name: Security Analysis
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest  # Keep Linux-only for security scans
     needs: code-quality
     
     steps:
@@ -147,6 +147,7 @@ jobs:
           retention-days: 30
           compression-level: 6
           if-no-files-found: warn
+
 
   test:
     name: Tests
