@@ -82,9 +82,9 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
 
-    security-analysis:
+  security-analysis:
     name: Security Analysis
-    runs-on: ubuntu-latest  # Keep Linux-only for security scans
+    runs-on: ubuntu-latest
     needs: code-quality
     
     steps:
@@ -148,7 +148,6 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
 
-
   test:
     name: Tests
     runs-on: ${{ matrix.os }}
@@ -173,9 +172,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y tshark wireshark-common
-          # Create wireshark group if it doesn't exist
           sudo groupadd -f wireshark
-          sudo usermod -a -G wireshark $USER || echo "Failed to add user to wireshark group, continuing..."
+          sudo usermod -a -G wireshark $USER || echo "Failed to add user to wireshark group"
 
       - name: Install system dependencies (macOS)
         if: matrix.os == 'macos-latest'
@@ -185,7 +183,7 @@ jobs:
       - name: Install system dependencies (Windows)
         if: matrix.os == 'windows-latest'
         run: |
-          echo "Windows dependencies installation - Wireshark requires manual setup"
+          echo "Skipping Wireshark installation on Windows CI"
 
       - name: Install Python dependencies
         run: |
@@ -197,13 +195,22 @@ jobs:
       - name: Install package in development mode
         run: pip install -e .
 
-      - name: Create test directories
+      - name: Create test directories (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           mkdir -p test-results
           mkdir -p coverage-reports
           echo "Test directories created successfully"
 
-      - name: Run unit tests with coverage
+      - name: Create test directories (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Force -Path "test-results"
+          New-Item -ItemType Directory -Force -Path "coverage-reports"
+          Write-Host "Test directories created successfully"
+
+      - name: Run unit tests with coverage (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           pytest tests/ \
             --cov=insight \
@@ -215,8 +222,14 @@ jobs:
             --tb=short \
             -n auto || echo "Some tests failed, but continuing..."
 
-      - name: Generate test summary
-        if: always()
+      - name: Run unit tests with coverage (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          pytest tests/ --cov=insight --cov-report=xml:coverage-reports/coverage.xml --cov-report=html:coverage-reports/htmlcov --cov-report=term --junit-xml=test-results/junit.xml --verbose --tb=short -n auto
+          if ($LASTEXITCODE -ne 0) { Write-Host "Some tests failed, but continuing..." }
+
+      - name: Generate test summary (Linux/macOS)
+        if: always() && matrix.os != 'windows-latest'
         run: |
           echo "# Test Results Summary" > test-results/summary.md
           echo "## Environment" >> test-results/summary.md
@@ -228,6 +241,21 @@ jobs:
             echo "## Test Results" >> test-results/summary.md
             echo "JUnit XML results generated successfully" >> test-results/summary.md
           fi
+
+      - name: Generate test summary (Windows)
+        if: always() && matrix.os == 'windows-latest'
+        run: |
+          $summaryPath = "test-results\summary.md"
+          "# Test Results Summary" | Out-File -FilePath $summaryPath -Encoding utf8
+          "## Environment" | Out-File -FilePath $summaryPath -Append -Encoding utf8
+          "- OS: ${{ matrix.os }}" | Out-File -FilePath $summaryPath -Append -Encoding utf8
+          "- Python: ${{ matrix.python-version }}" | Out-File -FilePath $summaryPath -Append -Encoding utf8
+          "- Timestamp: $(Get-Date)" | Out-File -FilePath $summaryPath -Append -Encoding utf8
+          "" | Out-File -FilePath $summaryPath -Append -Encoding utf8
+          if (Test-Path "test-results\junit.xml") {
+              "## Test Results" | Out-File -FilePath $summaryPath -Append -Encoding utf8
+              "JUnit XML results generated successfully" | Out-File -FilePath $summaryPath -Append -Encoding utf8
+          }
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -351,7 +379,8 @@ jobs:
           python -m build --wheel || echo "Wheel distribution build failed"
           echo "Wheel distribution build completed"
 
-      - name: Build PyInstaller executable
+      - name: Build PyInstaller executable (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           if [ -f insight/cli.py ]; then
             pyinstaller --clean --noconfirm \
@@ -366,7 +395,19 @@ jobs:
           fi
           echo "PyInstaller executable build completed"
 
-      - name: Create distribution summary
+      - name: Build PyInstaller executable (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          if (Test-Path "insight\cli.py") {
+            pyinstaller --clean --noconfirm --name packet-insight-${{ matrix.os }} --onefile --console --hidden-import pkg_resources.py2_warn --collect-all insight insight\cli.py
+            if ($LASTEXITCODE -ne 0) { Write-Host "PyInstaller build failed" }
+          } else {
+            Write-Host "CLI entry point not found, skipping PyInstaller build"
+          }
+          Write-Host "PyInstaller executable build completed"
+
+      - name: Create distribution summary (Linux/macOS)
+        if: matrix.os != 'windows-latest'
         run: |
           mkdir -p dist-reports
           echo "# Distribution Build Summary" > dist-reports/dist-summary-${{ matrix.os }}.md
@@ -379,6 +420,22 @@ jobs:
           if [ -d dist ]; then
             ls -la dist/ >> dist-reports/dist-summary-${{ matrix.os }}.md
           fi
+
+      - name: Create distribution summary (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          New-Item -ItemType Directory -Force -Path "dist-reports"
+          $summaryFile = "dist-reports\dist-summary-${{ matrix.os }}.md"
+          "# Distribution Build Summary" | Out-File -FilePath $summaryFile -Encoding utf8
+          "## Build Information" | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          "- OS: ${{ matrix.os }}" | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          "- Python: ${{ env.PYTHON_DEFAULT_VERSION }}" | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          "- Build Date: $(Get-Date)" | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          "" | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          "## Generated Files" | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          if (Test-Path "dist") {
+            Get-ChildItem -Path "dist" | Out-String | Out-File -FilePath $summaryFile -Append -Encoding utf8
+          }
 
       - name: Upload distributions
         uses: actions/upload-artifact@v4
@@ -411,7 +468,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y tshark wireshark-common
           sudo groupadd -f wireshark
-          sudo usermod -a -G wireshark $USER || echo "Failed to add user to wireshark group, continuing..."
+          sudo usermod -a -G wireshark $USER || echo "Failed to add user to wireshark group"
 
       - name: Download distributions
         uses: actions/download-artifact@v4
