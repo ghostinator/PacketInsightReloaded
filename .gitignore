@@ -2,3 +2,5 @@
 /.venv
 insight/__pycache__/cli.cpython-312.pyc
 /insight/__pycache__/*
+live_capture_en11_20250630_160116.pcap
+*.pcap

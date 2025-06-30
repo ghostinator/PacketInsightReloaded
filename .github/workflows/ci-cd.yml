@@ -13,9 +13,6 @@ env:
   NODE_VERSION: "18"
 
 jobs:
-  # =============================================================================
-  # CODE QUALITY & LINTING
-  # =============================================================================
   code-quality:
     name: Code Quality & Linting
     runs-on: ubuntu-latest
@@ -85,9 +82,6 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
 
-  # =============================================================================
-  # SECURITY ANALYSIS
-  # =============================================================================
   security-analysis:
     name: Security Analysis
     runs-on: ubuntu-latest
@@ -156,9 +150,6 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
 
-  # =============================================================================
-  # UNIT & INTEGRATION TESTS
-  # =============================================================================
   test:
     name: Tests
     runs-on: ${{ matrix.os }}
@@ -249,9 +240,6 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
 
-  # =============================================================================
-  # BUILD DOCUMENTATION
-  # =============================================================================
   build-docs:
     name: Build Documentation
     runs-on: ubuntu-latest
@@ -319,9 +307,6 @@ jobs:
           compression-level: 6
           if-no-files-found: error
 
-  # =============================================================================
-  # BUILD DISTRIBUTIONS
-  # =============================================================================
   build-distributions:
     name: Build Distributions
     runs-on: ${{ matrix.os }}
@@ -345,7 +330,7 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install build wheel setuptools twine pyinstaller
+          pip install build wheel setuptools pyinstaller
           pip install -r requirements.txt
 
       - name: Install package in development mode
@@ -396,15 +381,11 @@ jobs:
           name: distributions-${{ matrix.os }}-${{ github.run_id }}
           path: |
             dist/
-            dist/
             dist-summary-${{ matrix.os }}.md
           retention-days: 30
           compression-level: 6
           if-no-files-found: warn
 
-  # =============================================================================
-  # INTEGRATION TESTS
-  # =============================================================================
   integration-tests:
     name: Integration Tests
     runs-on: ubuntu-latest
@@ -481,14 +462,10 @@ jobs:
           compression-level: 6
           if-no-files-found: warn
 
-
-  # =============================================================================
-  # CREATE GITHUB RELEASE
-  # =============================================================================
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [publish-pypi]
+    needs: [build-distributions, integration-tests]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     
     steps:
@@ -514,13 +491,7 @@ jobs:
           echo "- Better error handling and user experience" >> release-notes.md
           echo "" >> release-notes.md
           echo "### Downloads" >> release-notes.md
-          echo "- Source code and wheels available on PyPI" >> release-notes.md
           echo "- Standalone executables attached to this release" >> release-notes.md
-          echo "" >> release-notes.md
-          echo "### Installation" >> release-notes.md
-          echo '```
-          echo "pip install packet-insight==${GITHUB_REF#refs/tags/v}" >> release-notes.md
-          echo '```' >> release-notes.md
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -535,9 +506,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # =============================================================================
-  # CLEANUP & NOTIFICATIONS
-  # =============================================================================
+  deployment-status:
+    name: Deployment Status
+    runs-on: ubuntu-latest
+    needs: [create-release]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Report deployment success
+        run: |
+          echo "🎉 Deployment completed successfully!"
+          echo "Version: ${GITHUB_REF#refs/tags/}"
+          echo "GitHub Release: https://github.com/${{ github.repository }}/releases/tag/${GITHUB_REF#refs/tags/}"
+
+      - name: Update deployment status
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-status-${{ github.run_id }}
+          path: |
+            echo "Deployment completed at $(date)" > deployment-status.txt
+          retention-days: 365
+          compression-level: 1
+
   cleanup:
     name: Cleanup & Notifications
     runs-on: ubuntu-latest
@@ -592,29 +582,3 @@ jobs:
         run: |
           echo "Cleanup completed - artifacts will expire based on retention-days settings"
           echo "Old artifacts are automatically cleaned up by GitHub Actions"
-
-  # =============================================================================
-  # DEPLOYMENT STATUS
-  # =============================================================================
-  deployment-status:
-    name: Deployment Status
-    runs-on: ubuntu-latest
-    needs: [create-release]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    
-    steps:
-      - name: Report deployment success
-        run: |
-          echo "🎉 Deployment completed successfully!"
-          echo "Version: ${GITHUB_REF#refs/tags/}"
-          echo "PyPI: https://pypi.org/project/packet-insight/"
-          echo "GitHub Release: https://github.com/${{ github.repository }}/releases/tag/${GITHUB_REF#refs/tags/}"
-
-      - name: Update deployment status
-        uses: actions/upload-artifact@v4
-        with:
-          name: deployment-status-${{ github.run_id }}
-          path: |
-            echo "Deployment completed at $(date)" > deployment-status.txt
-          retention-days: 365
-          compression-level: 1
